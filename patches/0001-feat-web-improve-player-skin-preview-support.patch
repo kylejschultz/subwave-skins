@@ -1,0 +1,388 @@
+From 7372bba65ec719f86773f227e22a0d7734e2bcec Mon Sep 17 00:00:00 2001
+From: Kyle Schultz <kyle@kjschultz.com>
+Date: Sat, 25 Jul 2026 11:54:39 -0700
+Subject: [PATCH 1/2] feat(web): improve player skin preview support
+
+---
+ web/components/PlayerApp.tsx           |  18 ++-
+ web/components/ThemeSwitcher.tsx       |  10 +-
+ web/components/player/PlayerShell.tsx  |   9 +-
+ web/components/player/StationTuner.tsx | 169 +++++++++++++++++++++++++
+ web/hooks/usePlayer.ts                 |  15 ++-
+ web/hooks/useStationFeed.ts            |   6 +-
+ web/next.config.js                     |   5 +
+ 7 files changed, 225 insertions(+), 7 deletions(-)
+ create mode 100644 web/components/player/StationTuner.tsx
+
+diff --git a/web/components/PlayerApp.tsx b/web/components/PlayerApp.tsx
+index 7831620..1503f20 100644
+--- a/web/components/PlayerApp.tsx
++++ b/web/components/PlayerApp.tsx
+@@ -9,11 +9,27 @@
+ // showcase embeds.
+ 
+ import PlayerShell from './player/PlayerShell';
++import { StationTunerProvider, useStationTuner } from './player/StationTuner';
++import { DEFAULT_STATION_ORIGIN, StationOriginProvider } from '@/lib/stationOrigin';
+ 
+ export interface PlayerAppProps {
+   contained?: boolean;
+ }
+ 
+ export default function PlayerApp({ contained = false }: PlayerAppProps) {
+-  return <PlayerShell contained={contained} />;
++  if (contained) return <PlayerShell contained />;
++  return (
++    <StationTunerProvider>
++      <TunedPlayerShell />
++    </StationTunerProvider>
++  );
++}
++
++function TunedPlayerShell() {
++  const tuner = useStationTuner();
++  return (
++    <StationOriginProvider value={tuner?.origin ?? DEFAULT_STATION_ORIGIN}>
++      <PlayerShell key={tuner?.active.slug ?? '__local'} />
++    </StationOriginProvider>
++  );
+ }
+diff --git a/web/components/ThemeSwitcher.tsx b/web/components/ThemeSwitcher.tsx
+index 8c88cc2..a0d310a 100644
+--- a/web/components/ThemeSwitcher.tsx
++++ b/web/components/ThemeSwitcher.tsx
+@@ -36,6 +36,8 @@ export interface ThemeSwitcherProps {
+   /** Visual variant — player chrome (TopBar) or admin header. Controls the
+    *  trigger button's text styling so it picks up the right cluster's font. */
+   variant?: 'player' | 'admin';
++  triggerClassName?: string;
++  contentClassName?: string;
+ }
+ 
+ // Per-listener theme + skin switcher. Drops into a header as a palette icon
+@@ -48,7 +50,11 @@ export interface ThemeSwitcherProps {
+ // The component renders nothing while the theme registry is still loading or
+ // is empty — there's nothing useful to show, and bouncing a button in and out
+ // would draw the eye more than just appearing once.
+-export default function ThemeSwitcher({ variant = 'player' }: ThemeSwitcherProps) {
++export default function ThemeSwitcher({
++  variant = 'player',
++  triggerClassName,
++  contentClassName,
++}: ThemeSwitcherProps) {
+   const ctx = useThemeSwitcher();
+   // Skin selection is only available inside a PlayerShell; the admin header
+   // variant gets null and hides the section. With a single shipped skin
+@@ -82,6 +88,7 @@ export default function ThemeSwitcher({ variant = 'player' }: ThemeSwitcherProps
+           className={cn(
+             'v3-focus inline-flex shrink-0 cursor-pointer items-center justify-center border-0 bg-transparent p-0 leading-none',
+             variant === 'admin' ? 'caption text-muted' : 'text-muted hover:text-ink',
++            triggerClassName,
+           )}
+         >
+           <Palette className="h-4 w-4" aria-hidden="true" />
+@@ -96,6 +103,7 @@ export default function ThemeSwitcher({ variant = 'player' }: ThemeSwitcherProps
+             'v3-modal-pop fixed top-1/2 left-1/2 z-50 flex flex-col border border-ink bg-bg text-ink shadow-drawer outline-none',
+             '-translate-x-1/2 -translate-y-1/2',
+             'max-h-[calc(100vh-3rem)] w-[min(360px,calc(100vw-2rem))]',
++            contentClassName,
+           )}
+         >
+           <div className="flex items-baseline justify-between gap-3 border-b border-ink px-5 py-3.5">
+diff --git a/web/components/player/PlayerShell.tsx b/web/components/player/PlayerShell.tsx
+index 2cfb89b..4f6c6cc 100644
+--- a/web/components/player/PlayerShell.tsx
++++ b/web/components/player/PlayerShell.tsx
+@@ -12,6 +12,7 @@
+ // station strictly (no override, no cache poisoning).
+ 
+ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
++import { useSearchParams } from 'next/navigation';
+ import { toast } from 'sonner';
+ import { Toaster } from '@/components/ui/toaster';
+ import { useThemeSwitcher } from '@/components/ThemeBootstrap';
+@@ -59,9 +60,11 @@ function targetInsideDialog(e?: KeyboardEvent): boolean {
+ }
+ 
+ function ShellChrome({ skin, contained }: { skin?: SkinComponent; contained: boolean }) {
++  const searchParams = useSearchParams();
+   const { audioRef } = usePlayerAudio();
+   const { state } = usePlayerFeed();
+   const stationSkinRaw = typeof state.ui?.skin === 'string' && state.ui.skin ? state.ui.skin : null;
++  const urlSkinId = contained ? null : searchParams.get('skin') || null;
+ 
+   // localStorage is effect-only (SSR renders the default), so a listener with
+   // an override or a cached non-default station skin swaps one tick after
+@@ -92,7 +95,7 @@ function ShellChrome({ skin, contained }: { skin?: SkinComponent; contained: boo
+   }, [contained, stationSkinRaw]);
+ 
+   const stationSkinId = stationSkinRaw ?? cachedStation ?? DEFAULT_SKIN_ID;
+-  const effectiveId = resolveSkinId(stationSkinId, contained ? null : overrideId);
++  const effectiveId = resolveSkinId(stationSkinId, contained ? null : (urlSkinId ?? overrideId));
+ 
+   const setOverride = useCallback((id: string | null) => {
+     saveSkinOverride(id);
+@@ -103,11 +106,11 @@ function ShellChrome({ skin, contained }: { skin?: SkinComponent; contained: boo
+     () => ({
+       skins: SKINS,
+       stationSkinId: resolveSkinId(stationSkinId, null),
+-      overrideId,
++      overrideId: urlSkinId ?? overrideId,
+       effectiveId,
+       setOverride,
+     }),
+-    [stationSkinId, overrideId, effectiveId, setOverride],
++    [stationSkinId, urlSkinId, overrideId, effectiveId, setOverride],
+   );
+ 
+   // Shell-level cycling shortcuts — they must work in EVERY skin (a skin
+diff --git a/web/components/player/StationTuner.tsx b/web/components/player/StationTuner.tsx
+new file mode 100644
+index 0000000..71f6cf7
+--- /dev/null
++++ b/web/components/player/StationTuner.tsx
+@@ -0,0 +1,169 @@
++'use client';
++
++import {
++  createContext,
++  useCallback,
++  useContext,
++  useEffect,
++  useMemo,
++  useState,
++  type ReactNode,
++} from 'react';
++import {
++  DEFAULT_STATION_ORIGIN,
++  originForStation,
++  type StationOrigin,
++} from '@/lib/stationOrigin';
++
++const STORAGE_KEY = 'subwave.stationOverride.v1';
++const CUSTOM_STATIONS_KEY = 'subwave.customStations.v1';
++
++export interface TunerStation {
++  slug: string;
++  name: string;
++  url: string;
++  location?: string;
++  genre?: string;
++  isLocal?: boolean;
++}
++
++interface StationTunerContextValue {
++  active: TunerStation;
++  stations: TunerStation[];
++  loading: boolean;
++  origin: StationOrigin;
++  addCustomStation: (input: string) => TunerStation | null;
++  setStation: (slug: string) => void;
++}
++
++const LOCAL_STATION: TunerStation = {
++  slug: '__local',
++  name: 'This station',
++  url: '',
++  isLocal: true,
++};
++
++const StationTunerContext = createContext<StationTunerContextValue | null>(null);
++
++function cleanStation(data: Record<string, unknown>): TunerStation | null {
++  const name = String(data.name ?? '').trim();
++  const url = String(data.url ?? '').trim();
++  const slug = String(data.slug ?? '').trim();
++  if (!name || !url || !slug) return null;
++  return {
++    slug,
++    name,
++    url,
++    ...(data.location ? { location: String(data.location) } : {}),
++    ...(data.genre ? { genre: String(data.genre) } : {}),
++  };
++}
++
++function stationFromUrl(input: string): TunerStation | null {
++  try {
++    const url = new URL(input.match(/^https?:\/\//i) ? input : `https://${input}`);
++    const origin = url.origin;
++    const host = url.host.replace(/^www\./, '');
++    return {
++      slug: `custom-${host.toLowerCase().replace(/[^a-z0-9]+/g, '-')}`,
++      name: host,
++      url: origin,
++      location: 'Saved station',
++    };
++  } catch {
++    return null;
++  }
++}
++
++function loadCustomStations(): TunerStation[] {
++  if (typeof window === 'undefined') return [];
++  try {
++    const data: unknown = JSON.parse(window.localStorage.getItem(CUSTOM_STATIONS_KEY) || '[]');
++    if (!Array.isArray(data)) return [];
++    return data
++      .map(item => cleanStation((item ?? {}) as Record<string, unknown>))
++      .filter((item): item is TunerStation => item != null);
++  } catch {
++    return [];
++  }
++}
++
++function saveCustomStations(stations: TunerStation[]) {
++  window.localStorage.setItem(CUSTOM_STATIONS_KEY, JSON.stringify(stations));
++}
++
++function loadSavedSlug(): string {
++  if (typeof window === 'undefined') return LOCAL_STATION.slug;
++  return window.localStorage.getItem(STORAGE_KEY) || LOCAL_STATION.slug;
++}
++
++export function StationTunerProvider({ children }: { children: ReactNode }) {
++  const [stations, setStations] = useState<TunerStation[]>([LOCAL_STATION]);
++  const [activeSlug, setActiveSlug] = useState(LOCAL_STATION.slug);
++  const [loading, setLoading] = useState(true);
++
++  useEffect(() => {
++    setActiveSlug(loadSavedSlug());
++    const custom = loadCustomStations();
++    if (custom.length > 0) setStations([LOCAL_STATION, ...custom]);
++    let alive = true;
++    void (async () => {
++      try {
++        const res = await fetch('/stations.json', { cache: 'force-cache' });
++        if (!res.ok) return;
++        const data: unknown = await res.json();
++        if (!Array.isArray(data)) return;
++        const remote = data
++          .map((item) => cleanStation((item ?? {}) as Record<string, unknown>))
++          .filter((item): item is TunerStation => item != null);
++        if (alive) setStations([LOCAL_STATION, ...custom, ...remote.filter(r => !custom.some(c => c.url === r.url))]);
++      } finally {
++        if (alive) setLoading(false);
++      }
++    })();
++    return () => {
++      alive = false;
++    };
++  }, []);
++
++  const active = stations.find(station => station.slug === activeSlug) ?? LOCAL_STATION;
++  const origin = active.isLocal ? DEFAULT_STATION_ORIGIN : originForStation(active.url);
++  const setStation = useCallback((slug: string) => {
++    const next = slug || LOCAL_STATION.slug;
++    setActiveSlug(next);
++    window.localStorage.setItem(STORAGE_KEY, next);
++  }, []);
++  const addCustomStation = useCallback((input: string) => {
++    const station = stationFromUrl(input);
++    if (!station) return null;
++    const existing = stations.find(s => s.url === station.url);
++    if (existing) {
++      setActiveSlug(existing.slug);
++      window.localStorage.setItem(STORAGE_KEY, existing.slug);
++      return existing;
++    }
++    setStations(prev => {
++      const next = [LOCAL_STATION, station, ...prev.filter(s => !s.isLocal)];
++      saveCustomStations(next.filter(s => !s.isLocal && s.slug.startsWith('custom-')));
++      return next;
++    });
++    setActiveSlug(station.slug);
++    window.localStorage.setItem(STORAGE_KEY, station.slug);
++    return station;
++  }, [stations]);
++
++  const value = useMemo<StationTunerContextValue>(
++    () => ({ active, stations, loading, origin, addCustomStation, setStation }),
++    [active, stations, loading, origin, addCustomStation, setStation],
++  );
++
++  return (
++    <StationTunerContext.Provider value={value}>
++      {children}
++    </StationTunerContext.Provider>
++  );
++}
++
++export function useStationTuner(): StationTunerContextValue | null {
++  return useContext(StationTunerContext);
++}
+diff --git a/web/hooks/usePlayer.ts b/web/hooks/usePlayer.ts
+index 2cb13a5..1855bd9 100644
+--- a/web/hooks/usePlayer.ts
++++ b/web/hooks/usePlayer.ts
+@@ -158,6 +158,8 @@ export function usePlayer({ initialVolume = 1 }: UsePlayerOptions = {}): Player
+   // we also check maxTouchPoints), and skip Firefox by UA.
+   useEffect(() => {
+     if (!streams.opus || opusFailedRef.current) return;
++    let cancelled = false;
++    const opusUrl = streams.opus;
+     const ua = navigator.userAgent;
+     // Desktop/Android Firefox + Gecko forks (LibreWolf, Waterfox) carry
+     // "Firefox" in the UA; Firefox-for-iOS reports "FxiOS" and is already
+@@ -167,8 +169,19 @@ export function usePlayer({ initialVolume = 1 }: UsePlayerOptions = {}): Player
+     const tester = document.createElement('audio');
+     const opusOk = tester.canPlayType('audio/ogg; codecs=opus');
+     if (opusOk === 'probably') {
+-      setStreamUrl(streams.opus);
++      void fetch(opusUrl, { method: 'HEAD', mode: 'cors', cache: 'no-store' })
++        .then(res => {
++          if (cancelled || !res.ok) return;
++          const type = res.headers.get('content-type') ?? '';
++          if (type.includes('audio') || type.includes('ogg')) {
++            setStreamUrl(opusUrl);
++          }
++        })
++        .catch(() => {
++          opusFailedRef.current = true;
++        });
+     }
++    return () => { cancelled = true; };
+   }, [streams.opus]);
+ 
+   // Drive `status` from the <audio> element's own events, and reconnect the
+diff --git a/web/hooks/useStationFeed.ts b/web/hooks/useStationFeed.ts
+index 4973d22..b9e7c41 100644
+--- a/web/hooks/useStationFeed.ts
++++ b/web/hooks/useStationFeed.ts
+@@ -129,7 +129,11 @@ export function useStationFeed(getListenerLagMs?: () => number | null): StationF
+         // actual mount and the burst this connection really got; the flat
+         // advertised depth is the fallback for viewers not listening here.
+         const measuredLagMs = getListenerLagMs?.() ?? null;
+-        const leadMs = measuredLagMs ?? leadMsRef.current;
++        // The audio element's buffered range is useful for detecting extra
++        // drift, but on Icecast streams it can under-report the actual burst
++        // delay. Keep the station-advertised buffer as the floor so metadata
++        // never jumps ahead of what this listener is hearing.
++        const leadMs = Math.max(measuredLagMs ?? 0, leadMsRef.current);
+         const audibleAt = Number.isFinite(serverStart) ? serverStart + leadMs : Date.now();
+ 
+         if (trackKey !== lastTrackKeyRef.current) {
+diff --git a/web/next.config.js b/web/next.config.js
+index 4184a1c..6c46e60 100644
+--- a/web/next.config.js
++++ b/web/next.config.js
+@@ -31,11 +31,16 @@ function resolveAppVersion() {
+ }
+ 
+ const version = resolveAppVersion();
++const allowedDevOrigins = (process.env.NEXT_ALLOWED_DEV_ORIGINS || '')
++  .split(',')
++  .map(origin => origin.trim())
++  .filter(Boolean);
+ 
+ /** @type {import('next').NextConfig} */
+ const nextConfig = {
+   output: 'standalone',
+   reactStrictMode: true,
++  ...(allowedDevOrigins.length > 0 ? { allowedDevOrigins } : {}),
+   env: {
+     NEXT_PUBLIC_APP_VERSION: version,
+   },
+-- 
+2.39.5 (Apple Git-154)
+

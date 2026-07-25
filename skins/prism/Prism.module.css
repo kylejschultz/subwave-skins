@@ -1,0 +1,324 @@
+.shell {
+  --prism-wash-a: color-mix(in oklab, var(--accent) 18%, transparent);
+  --prism-wash-b: color-mix(in oklab, var(--accent-2) 14%, transparent);
+  --prism-progress: 0%;
+  background:
+    linear-gradient(color-mix(in oklab, var(--ink) 2%, transparent) 1px, transparent 1px),
+    linear-gradient(90deg, color-mix(in oklab, var(--ink) 1.6%, transparent) 1px, transparent 1px),
+    var(--bg);
+  background-size: 38px 38px, 38px 38px, auto;
+}
+
+.background {
+  background:
+    radial-gradient(circle at 22% 16%, var(--prism-wash-a), transparent 30rem),
+    radial-gradient(circle at 82% 8%, var(--prism-wash-b), transparent 28rem),
+    linear-gradient(110deg, color-mix(in oklab, var(--bg) 94%, transparent), color-mix(in oklab, var(--bg) 78%, transparent) 56%, color-mix(in oklab, var(--bg) 90%, transparent));
+}
+
+.stageScrim {
+  background:
+    linear-gradient(90deg, color-mix(in oklab, var(--bg) 34%, transparent), color-mix(in oklab, var(--bg) 84%, transparent) 50%, color-mix(in oklab, var(--bg) 66%, transparent)),
+    radial-gradient(circle at 62% 48%, color-mix(in oklab, var(--accent) 7%, transparent), transparent 32rem);
+}
+
+.glass {
+  background:
+    linear-gradient(180deg, color-mix(in oklab, var(--surface) 46%, transparent), color-mix(in oklab, var(--bg) 26%, transparent)),
+    linear-gradient(110deg, color-mix(in oklab, var(--accent) 9%, transparent), transparent 62%);
+  border-color: color-mix(in oklab, var(--line) 50%, transparent);
+  box-shadow:
+    0 0 0 1px color-mix(in oklab, var(--accent) 7%, transparent),
+    0 26px 80px color-mix(in oklab, var(--bg) 70%, transparent);
+  backdrop-filter: blur(18px) saturate(135%);
+  -webkit-backdrop-filter: blur(18px) saturate(135%);
+}
+
+.quietGlass {
+  background:
+    linear-gradient(180deg, color-mix(in oklab, var(--surface) 46%, transparent), color-mix(in oklab, var(--bg) 26%, transparent)),
+    linear-gradient(110deg, color-mix(in oklab, var(--accent) 9%, transparent), transparent 62%);
+  border-color: color-mix(in oklab, var(--line) 50%, transparent);
+  box-shadow:
+    0 0 0 1px color-mix(in oklab, var(--accent) 7%, transparent),
+    0 18px 42px color-mix(in oklab, var(--bg) 48%, transparent);
+  backdrop-filter: blur(18px) saturate(135%);
+  -webkit-backdrop-filter: blur(18px) saturate(135%);
+}
+
+.quietGlass::before {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  content: "";
+  background:
+    linear-gradient(90deg, color-mix(in oklab, var(--bg) 28%, transparent), color-mix(in oklab, var(--bg) 12%, transparent)),
+    radial-gradient(circle at 74% 46%, color-mix(in oklab, var(--accent) 5%, transparent), transparent 15rem);
+  opacity: 0.78;
+}
+
+.sideRail {
+  isolation: isolate;
+}
+
+.sideRow {
+  position: relative;
+  z-index: 0;
+  padding-right: 0.35rem;
+  padding-left: 0.35rem;
+}
+
+.sideRow::before {
+  position: absolute;
+  inset: 0.18rem -0.1rem;
+  z-index: -1;
+  pointer-events: none;
+  content: "";
+  background:
+    linear-gradient(90deg, color-mix(in oklab, var(--bg) 26%, transparent), color-mix(in oklab, var(--surface) 18%, transparent)),
+    color-mix(in oklab, var(--ink) 4%, transparent);
+  opacity: 0.62;
+}
+
+.sideTrackTitle {
+  overflow-wrap: anywhere;
+}
+
+.sideTitle {
+  color: var(--ink);
+  text-shadow:
+    0 1px 12px color-mix(in oklab, var(--bg) 86%, transparent),
+    0 0 1px color-mix(in oklab, var(--surface) 80%, transparent);
+}
+
+.historyTitle {
+  color: color-mix(in oklab, var(--ink) 88%, var(--accent-2) 12%);
+  text-shadow:
+    0 1px 12px color-mix(in oklab, var(--bg) 88%, transparent),
+    0 0 1px color-mix(in oklab, var(--surface) 82%, transparent);
+}
+
+.sideMeta {
+  color: color-mix(in oklab, var(--ink) 76%, var(--accent-2) 24%);
+  text-shadow: 0 1px 10px color-mix(in oklab, var(--bg) 88%, transparent);
+}
+
+.sideAccent {
+  overflow-wrap: anywhere;
+  color: color-mix(in oklab, var(--accent) 72%, var(--ink) 28%);
+  text-shadow: 0 1px 10px color-mix(in oklab, var(--bg) 90%, transparent);
+}
+
+.lowFooter {
+  background:
+    linear-gradient(90deg, color-mix(in oklab, var(--surface) 20%, transparent), transparent 68%),
+    color-mix(in oklab, var(--bg) 8%, transparent);
+}
+
+.footerTheme {
+  display: inline-grid;
+  flex-shrink: 0;
+  width: 2.25rem;
+  height: 2.25rem;
+  place-items: center;
+  border: 1px solid color-mix(in oklab, var(--line) 36%, transparent);
+  background: color-mix(in oklab, var(--surface) 20%, transparent);
+  color: var(--accent);
+}
+
+.footerThemeTrigger {
+  width: 100%;
+  height: 100%;
+  color: inherit;
+}
+
+.footerTheme:hover {
+  border-color: var(--accent);
+}
+
+.footerButton {
+  flex-shrink: 0;
+  border: 1px solid color-mix(in oklab, var(--line) 48%, transparent);
+  background: color-mix(in oklab, var(--surface) 28%, transparent);
+  padding: 0.5rem 0.75rem;
+  color: var(--accent);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+}
+
+.footerButton:hover {
+  border-color: var(--accent);
+}
+
+.boothLine {
+  padding: 0.72rem 0 0.78rem;
+  border-top: 1px solid color-mix(in oklab, var(--line) 34%, transparent);
+  color: var(--accent-2);
+  text-shadow: 0 1px 10px color-mix(in oklab, var(--bg) 78%, transparent);
+}
+
+.boothLine:first-child {
+  border-top: 0;
+}
+
+.weatherPanel {
+  padding: 0.5rem 0.25rem 0.75rem;
+}
+
+.weatherWave {
+  margin-top: 2.25rem;
+  padding: 0.35rem 0 0.15rem;
+  opacity: 0.94;
+}
+
+.micText {
+  max-height: 5.4em;
+  overflow: auto;
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in oklab, var(--accent) 62%, transparent) transparent;
+}
+
+.title {
+  font-size: calc(clamp(2.35rem, 3.9vw, 3.6rem) * var(--prism-title-fit, 1));
+  line-height: 1.07;
+  max-height: 2.18em;
+  overflow: hidden;
+  overflow-wrap: normal;
+  text-wrap: pretty;
+  word-break: normal;
+}
+
+.titleFeature {
+  display: inline;
+  color: color-mix(in oklab, var(--ink) 78%, var(--accent) 22%);
+  font-size: 0.66em;
+  font-style: italic;
+  font-weight: 760;
+}
+
+.prismDialog {
+  background:
+    linear-gradient(180deg, color-mix(in oklab, var(--surface) 54%, transparent), color-mix(in oklab, var(--bg) 34%, transparent)),
+    linear-gradient(110deg, color-mix(in oklab, var(--accent) 9%, transparent), transparent 62%);
+  border-color: color-mix(in oklab, var(--line) 58%, transparent);
+  box-shadow:
+    0 0 0 1px color-mix(in oklab, var(--accent) 10%, transparent),
+    0 24px 80px color-mix(in oklab, var(--bg) 72%, transparent);
+  backdrop-filter: blur(18px) saturate(135%);
+  -webkit-backdrop-filter: blur(18px) saturate(135%);
+}
+
+.prismDialog :global(.v3-eyebrow) {
+  color: var(--accent);
+}
+
+.prismDialog :global(.v3-scroll) {
+  scrollbar-color: var(--accent) color-mix(in oklab, var(--surface) 42%, transparent);
+}
+
+.prismDialog :global(button[aria-pressed="true"]) {
+  border-color: var(--accent);
+  background: color-mix(in oklab, var(--accent) 12%, transparent);
+}
+
+.prismDialog :global(button:hover) {
+  border-color: var(--accent);
+}
+
+.volumePopover {
+  position: absolute;
+  bottom: calc(100% + 0.55rem);
+  left: 0;
+  z-index: 30;
+  width: min(72vw, 16.5rem);
+  padding: 0.75rem;
+  border: 1px solid color-mix(in oklab, var(--line) 52%, transparent);
+  background:
+    linear-gradient(180deg, color-mix(in oklab, var(--surface) 58%, transparent), color-mix(in oklab, var(--bg) 42%, transparent));
+  box-shadow: 0 18px 42px color-mix(in oklab, var(--bg) 58%, transparent);
+  transform: translateX(-50%);
+  backdrop-filter: blur(18px) saturate(130%);
+  -webkit-backdrop-filter: blur(18px) saturate(130%);
+}
+
+.volumePopover::after {
+  position: absolute;
+  bottom: -0.28rem;
+  left: 0.92rem;
+  width: 0.52rem;
+  height: 0.52rem;
+  border-right: 1px solid color-mix(in oklab, var(--line) 52%, transparent);
+  border-bottom: 1px solid color-mix(in oklab, var(--line) 52%, transparent);
+  background: color-mix(in oklab, var(--bg) 48%, var(--surface) 52%);
+  content: "";
+  transform: rotate(45deg);
+}
+
+.volumeHorizontal {
+  width: 100%;
+  min-width: 0;
+  height: 0.5rem;
+  cursor: pointer;
+  border-radius: 999px;
+  background:
+    linear-gradient(
+      90deg,
+      var(--accent) 0%,
+      color-mix(in oklab, var(--ink) 20%, var(--accent) 80%) var(--prism-volume, 100%),
+      color-mix(in oklab, var(--surface) 64%, transparent) var(--prism-volume, 100%),
+      color-mix(in oklab, var(--surface) 64%, transparent) 100%
+    );
+  box-shadow:
+    inset 0 0 0 1px color-mix(in oklab, var(--line) 36%, transparent),
+    0 0 16px color-mix(in oklab, var(--accent) 22%, transparent);
+  appearance: none;
+}
+
+.volumeHorizontal::-webkit-slider-thumb {
+  width: 1.05rem;
+  height: 1.05rem;
+  border: 2px solid var(--accent-2);
+  border-radius: 999px;
+  background: var(--accent);
+  box-shadow: 0 0 0 4px color-mix(in oklab, var(--accent) 18%, transparent);
+  appearance: none;
+}
+
+.volumeHorizontal::-moz-range-thumb {
+  width: 0.88rem;
+  height: 0.88rem;
+  border: 2px solid var(--accent-2);
+  border-radius: 999px;
+  background: var(--accent);
+  box-shadow: 0 0 0 4px color-mix(in oklab, var(--accent) 18%, transparent);
+}
+
+.volumeHorizontal:focus-visible {
+  outline: 2px solid color-mix(in oklab, var(--accent) 72%, transparent);
+  outline-offset: 4px;
+}
+
+@media (max-width: 1179px) {
+  .title {
+    font-size: calc(clamp(2.2rem, 8vw, 3.45rem) * var(--prism-title-fit, 1));
+    line-height: 1.08;
+  }
+}
+
+@media (min-width: 1180px) {
+  .weatherPanel {
+    min-height: 10.5rem;
+  }
+
+  .weatherWave {
+    margin-top: auto;
+    margin-bottom: auto;
+  }
+}
+
+.progress {
+  width: var(--prism-progress);
+}
