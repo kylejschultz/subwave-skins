@@ -25,14 +25,14 @@ import { useAnalyser } from '@/lib/hooks';
 import { cn } from '@/lib/cn';
 import { fmtTime, relTime } from '@/lib/format';
 import { useStationClient } from '@/lib/stationClient';
-import type { QueueEntry } from '@/lib/types';
+import type { QueueEntry, SessionTurn } from '@/lib/types';
 import {
   boothLines,
-  lastVoiceLine,
   listenerCountOf,
   progressRatio,
   stationIdentity,
   trackMeta,
+  type BoothLine,
 } from '../shared';
 import { useRequestSlip, useTrackLike, useVolumeNudge } from '../sharedHooks';
 import type { SkinProps } from '../types';
@@ -123,6 +123,51 @@ function turnTimeMs(t: string | number | undefined): number | null {
   if (t == null) return null;
   const at = new Date(t).getTime();
   return Number.isNaN(at) ? null : at;
+}
+
+const FALLBACK_LISTENER_LEAD_MS = 22_000;
+const VOICE_MIN_MS = 4_500;
+const VOICE_MAX_MS = 38_000;
+const VOICE_WORD_MS = 390;
+const VOICE_TAIL_MS = 2_000;
+
+function estimateVoiceMs(text: string): number {
+  const words = text.trim().split(/\s+/).filter(Boolean).length;
+  return Math.min(VOICE_MAX_MS, Math.max(VOICE_MIN_MS, words * VOICE_WORD_MS + VOICE_TAIL_MS));
+}
+
+function latestTrackTurnTime(messages: SessionTurn[]): number | null {
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const turn = messages[i];
+    if (turn?.role !== 'track') continue;
+    const at = turnTimeMs(turn.t);
+    if (at != null) return at;
+  }
+  return null;
+}
+
+function listenerLeadMs(messages: SessionTurn[], trackStartedAt: number | null): number {
+  const trackTurn = latestTrackTurnTime(messages);
+  if (trackStartedAt == null || trackTurn == null) return FALLBACK_LISTENER_LEAD_MS;
+  return Math.min(60_000, Math.max(0, trackStartedAt - trackTurn));
+}
+
+function audibleVoiceLine(
+  messages: SessionTurn[],
+  trackStartedAt: number | null,
+  nowMs: number,
+): BoothLine | null {
+  const leadMs = listenerLeadMs(messages, trackStartedAt);
+  const cutoff = trackStartedAt == null ? 0 : trackStartedAt - 45_000;
+  const voices = boothLines(messages, 32).filter(line => line.kind === 'voice');
+  for (const line of voices) {
+    const liveAt = turnTimeMs(line.t);
+    if (liveAt == null || liveAt < cutoff) continue;
+    const audibleAt = liveAt + leadMs;
+    if (audibleAt > nowMs) continue;
+    if (audibleAt + estimateVoiceMs(line.text) > nowMs) return line;
+  }
+  return null;
 }
 
 function sameBoothLine(a: { text: string; t: string | number | undefined } | null, b: { text: string; t: string | number | undefined }): boolean {
@@ -278,12 +323,8 @@ export default function PrismSkin(_props: SkinProps) {
   const weatherSummary = weather && (weather.temp != null || weather.condition)
     ? [weather.temp != null ? `${Math.round(weather.temp)} deg` : '', weather.condition ?? ''].filter(Boolean).join(' ')
     : '';
-  const latestVoice = lastVoiceLine(session.messages);
-  const voiceTime = turnTimeMs(latestVoice?.t);
-  const voiceBelongsToTrack =
-    latestVoice != null &&
-    (trackStartedAt == null || voiceTime == null || voiceTime >= trackStartedAt - 45000);
-  const voice = voiceBelongsToTrack ? latestVoice : null;
+  const [voiceClock, setVoiceClock] = useState(() => Date.now());
+  const voice = audibleVoiceLine(session.messages, trackStartedAt, voiceClock);
   const voiceAge = relativeTime(voice?.t);
   const spokenLines = boothLines(session.messages, 24)
     .filter(line => line.kind === 'voice')
@@ -335,6 +376,11 @@ export default function PrismSkin(_props: SkinProps) {
     m: toggleMute,
     r: openRequest,
   });
+
+  useEffect(() => {
+    const id = window.setInterval(() => setVoiceClock(Date.now()), 1000);
+    return () => window.clearInterval(id);
+  }, []);
 
   useEffect(() => {
     const el = titleRef.current;

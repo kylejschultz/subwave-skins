@@ -15,10 +15,10 @@ Upstream app integration patches:
 
 - `patches/0001-feat-web-improve-player-skin-preview-support.patch`
 - `patches/0002-feat-web-add-Prism-player-skin.patch`
+- `patches/0003-fix-web-keep-Prism-voice-line-until-audible-speech-e.patch`
 
 Apply the patches from the root of the upstream `subwave` repo with:
 
 ```sh
 git am patches/*.patch
 ```
-
