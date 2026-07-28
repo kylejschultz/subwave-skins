@@ -1,0 +1,24 @@
+name: Rebuild Prism player
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+jobs:
+  dispatch:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Dispatch Prism player rebuild
+        env:
+          GH_TOKEN: ${{ secrets.PRISM_PLAYER_REBUILD_TOKEN }}
+          TARGET_REPO: kylejschultz/subwave-prism-player
+          EVENT_TYPE: subwave-skins-updated
+        run: |
+          gh api \
+            --method POST \
+            "repos/${TARGET_REPO}/dispatches" \
+            -f event_type="${EVENT_TYPE}" \
+            -f client_payload[skins_sha]="${GITHUB_SHA}" \
+            -f client_payload[skins_ref]="${GITHUB_REF_NAME}"
