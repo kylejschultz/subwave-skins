@@ -109,6 +109,119 @@
   text-shadow: 0 1px 10px color-mix(in oklab, var(--bg) 90%, transparent);
 }
 
+.signalMeter {
+  margin-top: 0.55rem;
+  padding: 0.35rem 0 0.15rem;
+  opacity: 0.94;
+}
+
+.signalFloor {
+  display: none;
+}
+
+.footerWave {
+  display: none;
+}
+
+.transportProgress {
+  margin-top: 0.35rem;
+  padding-top: 0.15rem;
+}
+
+.controlRail {
+  display: flex;
+  min-width: 0;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.55rem;
+  margin-top: 0.9rem;
+  padding-top: 0.15rem;
+}
+
+.controlCluster {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 0.45rem;
+}
+
+.controlButton {
+  display: inline-grid;
+  flex: 0 0 auto;
+  width: 2.75rem;
+  height: 2.75rem;
+  place-items: center;
+  border: 1px solid color-mix(in oklab, var(--line) 44%, transparent);
+  background: color-mix(in oklab, var(--surface) 28%, transparent);
+  color: var(--accent);
+}
+
+.controlButton:hover {
+  border-color: var(--accent);
+}
+
+.primaryControl {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: var(--bg);
+}
+
+.activeControl {
+  border-color: var(--accent);
+  background: color-mix(in oklab, var(--accent) 88%, var(--bg) 12%);
+  color: var(--bg);
+}
+
+.volumeRocker {
+  display: flex;
+  flex: 1 1 11rem;
+  min-width: min(100%, 10rem);
+  max-width: 22rem;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0 0.35rem;
+}
+
+.themeSlot {
+  color: var(--accent);
+}
+
+.themeSlot :global(button) {
+  display: grid;
+  width: 100%;
+  height: 100%;
+  place-items: center;
+  color: inherit;
+}
+
+.infoGrid {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: 0.7rem 1rem;
+  padding: 1rem;
+  font-size: 0.82rem;
+}
+
+.infoGrid span {
+  color: var(--accent);
+  font-family: var(--font-mono);
+  font-size: 0.64rem;
+  font-weight: 900;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+}
+
+.infoGrid strong {
+  min-width: 0;
+  color: var(--accent-2);
+  font-weight: 760;
+}
+
+.quietMic {
+  color: color-mix(in oklab, var(--muted) 78%, var(--accent) 22%);
+  font-style: italic;
+}
+
 .lowFooter {
   background:
     linear-gradient(90deg, color-mix(in oklab, var(--surface) 20%, transparent), transparent 68%),
@@ -162,16 +275,6 @@
 
 .boothLine:first-child {
   border-top: 0;
-}
-
-.weatherPanel {
-  padding: 0.5rem 0.25rem 0.75rem;
-}
-
-.weatherWave {
-  margin-top: 2.25rem;
-  padding: 0.35rem 0 0.15rem;
-  opacity: 0.94;
 }
 
 .micText {
@@ -309,13 +412,96 @@
 }
 
 @media (min-width: 1180px) {
-  .weatherPanel {
-    min-height: 10.5rem;
+  .signalMeter {
+    margin-top: 0.2rem;
+    margin-bottom: 0;
   }
 
-  .weatherWave {
-    margin-top: auto;
-    margin-bottom: auto;
+  .controlRail {
+    margin-top: clamp(1.4rem, 3.2vh, 2.4rem);
+  }
+
+  .signalFloor {
+    position: absolute;
+    right: 1.5rem;
+    bottom: 1.35rem;
+    left: 1.5rem;
+    z-index: 1;
+    display: grid;
+    grid-template-columns: minmax(11rem, 1.25fr) minmax(8rem, 0.85fr) minmax(12rem, 1.4fr) minmax(10rem, 1.05fr);
+    gap: clamp(1.2rem, 3vw, 3rem);
+    padding-top: 1.05rem;
+    border-top: 1px solid color-mix(in oklab, var(--line) 26%, transparent);
+    color: color-mix(in oklab, var(--accent-2) 62%, transparent);
+    opacity: 0.62;
+  }
+
+  .footerWave {
+    position: absolute;
+    top: -3.75rem;
+    right: 0;
+    left: 0;
+    display: block;
+    height: 3.7rem;
+    pointer-events: none;
+    opacity: 0.22;
+    mask-image: linear-gradient(90deg, transparent 0%, black 15%, black 85%, transparent 100%);
+  }
+
+  .footerWave::after {
+    position: absolute;
+    right: 0;
+    bottom: 0.15rem;
+    left: 0;
+    height: 1px;
+    content: "";
+    background: color-mix(in oklab, var(--accent) 22%, transparent);
+  }
+
+  .signalFloor div {
+    min-width: 0;
+  }
+
+  .signalFloor p {
+    margin-top: 0.38rem;
+    overflow: hidden;
+    font-size: 0.78rem;
+    font-weight: 720;
+    line-height: 1.2;
+    text-overflow: ellipsis;
+    text-transform: uppercase;
+    white-space: nowrap;
+  }
+
+  .weatherReport {
+    display: grid;
+    min-width: 0;
+    gap: 0.18rem;
+  }
+
+  .weatherReport p {
+    margin-top: 0.38rem;
+    color: color-mix(in oklab, var(--ink) 78%, var(--accent) 22%);
+  }
+
+  .weatherReport span {
+    color: color-mix(in oklab, var(--accent-2) 54%, transparent);
+  }
+
+  .footerDetail,
+  .weatherReport span {
+    display: block;
+    margin-top: 0.18rem;
+    min-width: 0;
+    overflow: hidden;
+    font-size: 0.68rem;
+    font-weight: 720;
+    letter-spacing: 0.1em;
+    line-height: 1.1;
+    text-overflow: ellipsis;
+    text-transform: uppercase;
+    white-space: nowrap;
+    color: color-mix(in oklab, var(--accent-2) 54%, transparent);
   }
 }
 

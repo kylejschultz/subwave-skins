@@ -3,16 +3,15 @@
 // Prism - a cover-wash console skin. It keeps the prototype's translucent
 // booth-glass feel while consuming only the shared SUB/WAVE player contexts.
 
-import { useEffect, useRef, useState, type RefObject } from 'react';
+import { useEffect, useMemo, useRef, useState, type RefObject } from 'react';
 import * as Dialog from '@radix-ui/react-dialog';
-import { Check, Heart, LoaderCircle, MapPin, Play, Plus, RadioTower, Send, Square, X } from 'lucide-react';
+import { Heart, Info, LoaderCircle, Play, Send, Square, Volume2, VolumeX, X } from 'lucide-react';
 import styles from './Prism.module.css';
 import {
   usePlayerActions,
   usePlayerAudio,
   usePlayerFeed,
 } from '@/components/player/PlayerCore';
-import { useStationTuner } from '@/components/player/StationTuner';
 import { useTuneInGate } from '@/components/player/useTuneInGate';
 import ThemeSwitcher from '@/components/ThemeSwitcher';
 import { ScrollArea } from '@/components/ui/scroll-area';
@@ -23,9 +22,9 @@ import { useElapsed } from '@/hooks/useElapsed';
 import { useKeyboardShortcuts } from '@/hooks/useKeyboardShortcuts';
 import { useAnalyser } from '@/lib/hooks';
 import { cn } from '@/lib/cn';
-import { fmtTime, relTime } from '@/lib/format';
+import { fmtClockMinute, fmtTime, normalizeStationLocale, relTime, zonedDayHour } from '@/lib/format';
 import { useStationClient } from '@/lib/stationClient';
-import type { QueueEntry } from '@/lib/types';
+import type { QueueEntry, ScheduleGrid, SchedulePayload, ScheduleShow, StationLocale } from '@/lib/types';
 import {
   boothLines,
   lastVoiceLine,
@@ -36,37 +35,6 @@ import {
 } from '../shared';
 import { useRequestSlip, useTrackLike, useVolumeNudge } from '../sharedHooks';
 import type { SkinProps } from '../types';
-
-function WeatherIcon() {
-  return (
-    <svg viewBox="0 0 24 24" width="16" height="16" fill="none" aria-hidden>
-      <path
-        d="M12 5.5v-2M12 20.5v-2M5.5 12h-2M20.5 12h-2M7.4 7.4 6 6M18 18l-1.4-1.4M16.6 7.4 18 6M6 18l1.4-1.4"
-        stroke="currentColor"
-        strokeWidth="1.6"
-        strokeLinecap="round"
-      />
-      <circle cx="12" cy="12" r="4.2" stroke="currentColor" strokeWidth="1.8" />
-    </svg>
-  );
-}
-
-function PrismVolumeIcon({ muted, level }: { muted: boolean; level: 0 | 1 | 2 | 3 }) {
-  return (
-    <svg viewBox="0 0 24 24" width="20" height="20" fill="none" aria-hidden>
-      <path d="M4 9v6h4l5 4V5L8 9H4z" fill="currentColor" />
-      {muted ? (
-        <path d="M17 9l4 4M21 9l-4 4" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
-      ) : (
-        <>
-          {level >= 1 && <path d="M16.4 10.4a2.6 2.6 0 0 1 0 3.2" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" />}
-          {level >= 2 && <path d="M18.6 7.8a6 6 0 0 1 0 8.4" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" />}
-          {level >= 3 && <path d="M20.8 5.2a9.2 9.2 0 0 1 0 13.6" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" />}
-        </>
-      )}
-    </svg>
-  );
-}
 
 function Label({ children }: { children: React.ReactNode }) {
   return (
@@ -82,6 +50,10 @@ function Tag({ children }: { children: React.ReactNode }) {
       {children}
     </span>
   );
+}
+
+function titleCase(value: string): string {
+  return value.replace(/\S+/g, word => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase());
 }
 
 function Panel({
@@ -125,10 +97,6 @@ function turnTimeMs(t: string | number | undefined): number | null {
   return Number.isNaN(at) ? null : at;
 }
 
-function sameBoothLine(a: { text: string; t: string | number | undefined } | null, b: { text: string; t: string | number | undefined }): boolean {
-  return a != null && a.text === b.text && a.t === b.t;
-}
-
 function splitFeaturedTitle(title: string): { main: string; feature?: string } {
   const match = title.match(/\s+((?:feat\.?|ft\.?|featuring)\s+.+)$/i);
   if (!match?.index) return { main: title };
@@ -161,6 +129,49 @@ function QueueRow({ entry, muted = false }: { entry: QueueEntry; muted?: boolean
 
 const WAVE_BARS = 34;
 
+function pad2(n: number): string {
+  return n < 10 ? `0${n}` : String(n);
+}
+
+function fmtHour(hour: number, locale: StationLocale): string {
+  if (locale === 'en-US') {
+    const h = hour % 24;
+    const suffix = h < 12 ? 'AM' : 'PM';
+    return `${h % 12 || 12}:00 ${suffix}`;
+  }
+  return `${pad2(hour % 24)}:00`;
+}
+
+function endHourForCurrentBlock(grid: ScheduleGrid, day: number, hour: number): number {
+  const dayGrid = grid[day];
+  if (!Array.isArray(dayGrid)) return hour;
+  const current = dayGrid[hour] ?? null;
+  let h = hour;
+  while (h + 1 < 24 && (dayGrid[h + 1] ?? null) === current) h++;
+  return h;
+}
+
+function nextScheduledShow(
+  data: SchedulePayload,
+  day: number,
+  hour: number,
+): { show: ScheduleShow | null; startHour: number } | null {
+  const showById = new Map(data.shows.map(show => [show.id, show]));
+  const currentId = data.schedule[day]?.[hour] ?? null;
+  for (let offset = 1; offset <= 24 * 7; offset++) {
+    const absoluteHour = hour + offset;
+    const candidateDay = (day + Math.floor(absoluteHour / 24)) % 7;
+    const candidateHour = absoluteHour % 24;
+    const id = data.schedule[candidateDay]?.[candidateHour] ?? null;
+    if (id === currentId) continue;
+    return {
+      show: id ? showById.get(id) || null : null,
+      startHour: candidateHour,
+    };
+  }
+  return null;
+}
+
 function PrismWaveform({
   audioRef,
   active,
@@ -179,7 +190,6 @@ function PrismWaveform({
     if (!canvas || !ctx) return;
 
     let raf = 0;
-    let frame = 0;
     const levels = levelsRef.current;
 
     const draw = () => {
@@ -198,25 +208,24 @@ function PrismWaveform({
       const css = getComputedStyle(canvas);
       const activeColor = css.getPropertyValue('--accent').trim() || '#21d9ef';
       const idleColor = css.getPropertyValue('--muted').trim() || '#7f8b94';
-      const capColor = css.getPropertyValue('--ink').trim() || activeColor;
       const bins = active && ready && !lite ? read() : null;
 
       ctx.clearRect(0, 0, width, height);
       const gap = Math.max(1, 2 * dpr);
       const slot = width / WAVE_BARS;
       const barW = Math.max(1, slot - gap);
-      const mid = height / 2;
 
       for (let i = 0; i < WAVE_BARS; i++) {
-        let target = 0.08;
+        let target = 0.1;
         if (bins) {
           const start = Math.floor(Math.pow(i / WAVE_BARS, 1.45) * bins.length * 0.72);
           const end = Math.max(start + 1, Math.floor(Math.pow((i + 1) / WAVE_BARS, 1.45) * bins.length * 0.72));
           let sum = 0;
           for (let b = start; b < end; b++) sum += bins[b] ?? 0;
-          target = Math.max(0.08, (sum / (end - start) / 255) * (1 - i / (WAVE_BARS * 3)));
+          const raw = sum / (end - start) / 255;
+          target = Math.max(0.1, Math.pow(raw, 0.62) * (0.86 - i / (WAVE_BARS * 5)));
         } else if (active && !lite) {
-          target = Math.max(0.08, Math.pow(Math.random(), 1.8) * (1 - i / (WAVE_BARS * 2.5)) * 0.62);
+          target = Math.max(0.1, 0.12 + Math.pow(Math.random(), 1.8) * (1 - i / (WAVE_BARS * 2.5)) * 0.58);
         }
 
         const current = levels[i] ?? 0;
@@ -224,16 +233,11 @@ function PrismWaveform({
         levels[i] = next;
         const barH = Math.max(1, next * height);
         const x = i * slot;
-        const y = mid - barH / 2;
+        const y = height - barH;
         ctx.fillStyle = active ? activeColor : idleColor;
         ctx.fillRect(x, y, barW, barH);
-        if (active && next > 0.18 && i % 3 === frame % 3) {
-          ctx.fillStyle = capColor;
-          ctx.fillRect(x, y, barW, Math.max(1, 1.25 * dpr));
-        }
       }
 
-      frame += 1;
       raf = requestAnimationFrame(draw);
     };
 
@@ -248,12 +252,11 @@ export default function PrismSkin(_props: SkinProps) {
   const client = useStationClient();
   const {
     nowPlaying, context, dj, activeShow, listeners, state, session,
-    trackStartedAt,
+    trackStartedAt, timezone, locale,
   } = usePlayerFeed();
   const { audioRef, tunedIn, status, volume, muted, offline, signal } = usePlayerAudio();
   const { toggleMute, setVolume } = usePlayerActions();
   const { showOverlay, tuneInFromOverlay, handleTune } = useTuneInGate();
-  const tuner = useStationTuner();
 
   const elapsed = useElapsed(trackStartedAt);
   const listenerCount = listenerCountOf(listeners);
@@ -274,24 +277,53 @@ export default function PrismSkin(_props: SkinProps) {
   const titleParts = splitFeaturedTitle(title);
   const artist = offline ? '' : (nowPlaying?.artist ?? '');
   const weather = context?.weather;
-  const weatherLocation = weather?.location;
-  const weatherSummary = weather && (weather.temp != null || weather.condition)
-    ? [weather.temp != null ? `${Math.round(weather.temp)} deg` : '', weather.condition ?? ''].filter(Boolean).join(' ')
-    : '';
+  const weatherTemp = weather?.temp != null ? `${Math.round(weather.temp)} degrees` : '';
+  const weatherCondition = weather?.condition ? titleCase(weather.condition) : '';
+  const weatherLocation = weather?.location ? titleCase(weather.location) : '';
+  const weatherSummary =
+    weatherTemp && weatherCondition
+      ? `${weatherTemp} and ${weatherCondition}`
+      : weatherTemp || weatherCondition || '';
   const latestVoice = lastVoiceLine(session.messages);
   const voiceTime = turnTimeMs(latestVoice?.t);
+  const [boothClock, setBoothClock] = useState(() => Date.now());
+  const [schedule, setSchedule] = useState<SchedulePayload | null>(null);
   const voiceBelongsToTrack =
     latestVoice != null &&
     (trackStartedAt == null || voiceTime == null || voiceTime >= trackStartedAt - 45000);
-  const voice = voiceBelongsToTrack ? latestVoice : null;
+  const voiceFresh = voiceTime == null || boothClock - voiceTime <= 5 * 60 * 1000;
+  const voice = voiceBelongsToTrack && voiceFresh ? latestVoice : null;
   const voiceAge = relativeTime(voice?.t);
   const spokenLines = boothLines(session.messages, 24)
     .filter(line => line.kind === 'voice')
-    .filter(line => !sameBoothLine(voice, line))
     .slice(-5)
     .reverse();
   const upNext = (state.upcoming ?? []).slice(0, 1);
   const history = (state.history ?? []).slice(0, 8);
+  const showLine = showName ? `${showName} with ${djName}` : `with ${djName}`;
+  const listenerLine = listenerCount == null
+    ? null
+    : `${listenerCount} ${listenerCount === 1 ? 'person' : 'people'} tuned in`;
+  const nowPlayingLabel = listenerCount == null
+    ? 'now playing'
+    : `now playing for ${listenerCount} ${listenerCount === 1 ? 'listener' : 'listeners'}`;
+  const weatherLine = offline ? 'Off air' : '';
+  const statusLine = offline ? 'off air' : playing ? 'on air' : tunedIn ? status : 'ready';
+  const scheduleLocale = normalizeStationLocale(schedule?.locale ?? locale);
+  const scheduleTimezone = schedule?.timezone ?? timezone;
+  const stationTime = fmtClockMinute(boothClock, scheduleTimezone, scheduleLocale);
+  const showTiming = useMemo(() => {
+    if (!schedule) return null;
+    const { dow, hour } = zonedDayHour(new Date(boothClock), scheduleTimezone);
+    const endHour = endHourForCurrentBlock(schedule.schedule, dow, hour);
+    const next = nextScheduledShow(schedule, dow, hour);
+    return {
+      until: `until ${fmtHour((endHour + 1) % 24, scheduleLocale)}`,
+      next: next
+        ? `${next.show?.name || 'Autonomous'} at ${fmtHour(next.startHour, scheduleLocale)}`
+        : 'No later show',
+    };
+  }, [boothClock, schedule, scheduleLocale, scheduleTimezone]);
 
   const slip = useRequestSlip({
     sent: 'Request received - the DJ has it.',
@@ -300,16 +332,13 @@ export default function PrismSkin(_props: SkinProps) {
   });
   const requestRef = useRef<HTMLInputElement | null>(null);
   const [requestOpen, setRequestOpen] = useState(false);
-  const [volumeOpen, setVolumeOpen] = useState(false);
-  const volumeRef = useRef<HTMLDivElement | null>(null);
-  const [stationOpen, setStationOpen] = useState(false);
-  const [stationUrl, setStationUrl] = useState('');
+  const [infoOpen, setInfoOpen] = useState(false);
+  const [playerUrl, setPlayerUrl] = useState('');
   const titleRef = useRef<HTMLHeadingElement | null>(null);
   const [titleFit, setTitleFit] = useState(1);
   const like = useTrackLike();
   const adjustVolume = useVolumeNudge();
   const volumePercent = Math.round(volume * 100);
-  const volumeLevel = volume <= 0 ? 0 : volume < 0.34 ? 1 : volume < 0.68 ? 2 : 3;
   const openRequest = () => {
     setRequestOpen(true);
     requestAnimationFrame(() => requestRef.current?.focus());
@@ -335,6 +364,30 @@ export default function PrismSkin(_props: SkinProps) {
     m: toggleMute,
     r: openRequest,
   });
+
+  useEffect(() => {
+    const id = window.setInterval(() => setBoothClock(Date.now()), 30_000);
+    return () => window.clearInterval(id);
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const data = await client.schedule();
+        if (!cancelled) setSchedule(data);
+      } catch {
+        if (!cancelled) setSchedule(null);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [client]);
+
+  useEffect(() => {
+    setPlayerUrl(window.location.href);
+  }, []);
 
   useEffect(() => {
     const el = titleRef.current;
@@ -370,26 +423,6 @@ export default function PrismSkin(_props: SkinProps) {
     };
   }, [title]);
 
-  useEffect(() => {
-    if (!volumeOpen) return;
-
-    function closeOnPointerDown(event: PointerEvent) {
-      if (volumeRef.current?.contains(event.target as Node)) return;
-      setVolumeOpen(false);
-    }
-
-    function closeOnEscape(event: KeyboardEvent) {
-      if (event.key === 'Escape') setVolumeOpen(false);
-    }
-
-    window.addEventListener('pointerdown', closeOnPointerDown);
-    window.addEventListener('keydown', closeOnEscape);
-    return () => {
-      window.removeEventListener('pointerdown', closeOnPointerDown);
-      window.removeEventListener('keydown', closeOnEscape);
-    };
-  }, [volumeOpen]);
-
   return (
     <div ref={rootRef} className={cn('absolute inset-0 overflow-hidden font-sans text-ink', styles.shell)}>
       <div className={cn('pointer-events-none absolute inset-0', styles.background)} aria-hidden="true">
@@ -413,9 +446,9 @@ export default function PrismSkin(_props: SkinProps) {
         <div className="grid min-h-0 min-w-0 flex-1 grid-cols-1 gap-4 overflow-y-auto min-[1180px]:grid-cols-[minmax(0,1fr)_minmax(270px,320px)] min-[1180px]:overflow-hidden">
           <main className={cn('relative overflow-visible border min-[1180px]:min-h-0 min-[1180px]:overflow-hidden', styles.glass)}>
             <div className={cn('pointer-events-none absolute inset-0', styles.stageScrim)} aria-hidden="true" />
-            <div className="relative z-10 grid min-w-0 grid-cols-1 gap-6 p-4 min-[1180px]:h-full min-[1180px]:min-h-0 min-[1180px]:grid-cols-[minmax(260px,38vh)_minmax(0,1fr)] min-[1180px]:p-6 xl:grid-cols-[minmax(320px,44vh)_minmax(0,1fr)]">
-              <div className="contents min-[1180px]:flex min-[1180px]:min-w-0 min-[1180px]:flex-col min-[1180px]:justify-center min-[1180px]:gap-3">
-                <div className="relative order-1 aspect-square w-full max-w-[420px] self-center overflow-hidden border border-[color-mix(in_oklab,var(--line)_62%,transparent)] bg-[color-mix(in_oklab,var(--bg)_34%,transparent)] shadow-2xl shadow-[color-mix(in_oklab,var(--bg)_72%,transparent)] min-[1180px]:max-w-none min-[1180px]:self-auto">
+            <div className="relative z-10 grid min-w-0 grid-cols-1 gap-6 p-4 min-[1180px]:h-full min-[1180px]:min-h-0 min-[1180px]:grid-cols-[minmax(300px,43vh)_minmax(0,1fr)] min-[1180px]:p-6 xl:grid-cols-[minmax(360px,52vh)_minmax(0,1fr)]">
+              <div className="contents min-[1180px]:flex min-[1180px]:min-w-0 min-[1180px]:flex-col min-[1180px]:justify-start min-[1180px]:gap-5">
+                <div className="relative order-1 aspect-square w-full max-w-[460px] self-center overflow-hidden border border-[color-mix(in_oklab,var(--line)_62%,transparent)] bg-[color-mix(in_oklab,var(--bg)_34%,transparent)] shadow-2xl shadow-[color-mix(in_oklab,var(--bg)_72%,transparent)] min-[1180px]:max-w-none min-[1180px]:self-auto">
                   {coverSrc && !offline ? (
                     <img src={coverSrc} alt={nowPlaying?.album || nowPlaying?.title || ''} className="h-full w-full object-cover" />
                   ) : (
@@ -425,35 +458,13 @@ export default function PrismSkin(_props: SkinProps) {
                   )}
                 </div>
 
-                <div className={cn('order-3 min-[1180px]:flex min-[1180px]:flex-1 min-[1180px]:flex-col', styles.weatherPanel)}>
-                  {(weatherLocation || weatherSummary) && (
-                    <div className="text-[var(--accent)]">
-                      <div className="flex items-center gap-2">
-                        <WeatherIcon />
-                        <Label>Broadcasting from</Label>
-                      </div>
-                      {weatherLocation && (
-                        <p className="mt-1 truncate pl-6 text-xs font-semibold text-[var(--accent-2)] uppercase">
-                          {weatherLocation}
-                        </p>
-                      )}
-                      {weatherSummary && (
-                        <p className="mt-0.5 truncate pl-6 text-xs font-semibold text-muted uppercase">
-                          {weatherSummary}
-                        </p>
-                      )}
-                    </div>
-                  )}
-                  <div className={cn('mx-auto h-20 w-[96%] max-w-[420px] min-[1180px]:mx-0 min-[1180px]:w-full min-[1180px]:max-w-none', styles.weatherWave)}>
-                    <PrismWaveform audioRef={audioRef} active={playing} />
-                  </div>
-                </div>
+                <div className="order-3 min-[1180px]:hidden" />
               </div>
 
-              <div className="order-2 flex min-w-0 flex-col justify-center gap-4 py-2 min-[1180px]:order-none">
+              <div className="order-2 flex min-w-0 flex-col justify-start gap-4 py-2 min-[1180px]:order-none min-[1180px]:h-full min-[1180px]:py-0">
                 <div className="min-w-0">
                   <span className="bg-[var(--accent)] px-2 py-1 font-mono text-[10px] font-black text-bg uppercase">
-                    now playing
+                    {nowPlayingLabel}
                   </span>
                   <h1
                     ref={titleRef}
@@ -486,20 +497,18 @@ export default function PrismSkin(_props: SkinProps) {
                 </div>
 
                 <div className="min-h-[72px]">
-                  {voice && (
-                    <div className="border-l-2 border-[var(--accent)] bg-[color-mix(in_oklab,var(--bg)_30%,transparent)] px-3 py-2.5 backdrop-blur-md">
-                      <div className="mb-1 flex items-center justify-between gap-2">
-                        <Label>On the mic</Label>
-                        <span className="font-mono text-[10px] text-muted">{voiceAge}</span>
-                      </div>
-                      <p className={cn('text-sm leading-snug font-semibold text-[var(--accent-2)]', styles.micText)}>
-                        {voice.text}
-                      </p>
+                  <div className="border-l-2 border-[var(--accent)] bg-[color-mix(in_oklab,var(--bg)_30%,transparent)] px-3 py-2.5 backdrop-blur-md">
+                    <div className="mb-1 flex items-center justify-between gap-2">
+                      <Label>From the booth</Label>
+                      {voice && <span className="font-mono text-[10px] text-muted">{voiceAge}</span>}
                     </div>
-                  )}
+                    <p className={cn('text-sm leading-snug font-semibold text-[var(--accent-2)]', styles.micText, !voice && styles.quietMic)}>
+                      {voice ? voice.text : 'Quiet in the booth...'}
+                    </p>
+                  </div>
                 </div>
 
-                <div>
+                <div className={styles.transportProgress}>
                   <div className="h-2 w-full overflow-hidden bg-[color-mix(in_oklab,var(--bg)_78%,var(--ink))]">
                     <div className={cn('h-full bg-[var(--accent)] transition-[width] duration-1000 ease-linear', styles.progress)} />
                   </div>
@@ -509,88 +518,156 @@ export default function PrismSkin(_props: SkinProps) {
                   </div>
                 </div>
 
-                <div className="flex flex-wrap items-center gap-2.5 border-t border-[color-mix(in_oklab,var(--line)_54%,transparent)] pt-3">
-                  <button
-                    type="button"
-                    onClick={offline ? undefined : handleTune}
-                    disabled={offline}
-                    aria-label={offline ? 'Stream offline' : tunedIn ? 'Tune out' : 'Tune in'}
-                    title={offline ? 'The station is currently off air' : tunedIn ? 'Tune out' : 'Tune in'}
-                    className={cn(
-                      'v3-focus grid size-12 place-items-center bg-[var(--accent)] text-bg transition hover:brightness-110',
-                      offline ? 'cursor-default opacity-50' : 'cursor-pointer',
-                    )}
-                  >
-                    {connecting ? (
-                      <LoaderCircle aria-hidden className="size-5 animate-spin" />
-                    ) : tunedIn ? (
-                      <Square aria-hidden className="size-5 fill-current" />
-                    ) : (
-                      <Play aria-hidden className="size-5 fill-current" />
-                    )}
-                  </button>
-                  <div className="relative" ref={volumeRef}>
+                <div className={styles.controlRail}>
+                  <div className={styles.controlCluster}>
                     <button
                       type="button"
-                      onClick={() => setVolumeOpen(open => !open)}
-                      aria-label={`Volume ${volumePercent}%`}
-                      aria-expanded={volumeOpen}
-                      aria-haspopup="dialog"
+                      onClick={offline ? undefined : handleTune}
+                      disabled={offline}
+                      aria-label={offline ? 'Stream offline' : tunedIn ? 'Tune out' : 'Tune in'}
+                      title={offline ? 'The station is currently off air' : tunedIn ? 'Tune out' : 'Tune in'}
                       className={cn(
-                        'v3-focus grid size-10 cursor-pointer place-items-center border border-[var(--line)] bg-[color-mix(in_oklab,var(--surface)_36%,transparent)] text-[var(--accent)] hover:border-[var(--accent)]',
-                        muted && 'border-[var(--accent)] bg-[var(--accent)] text-bg',
+                        styles.controlButton,
+                        styles.primaryControl,
+                        offline ? 'cursor-default opacity-50' : 'cursor-pointer',
                       )}
                     >
-                      <PrismVolumeIcon muted={muted} level={volumeLevel} />
+                      {connecting ? (
+                        <LoaderCircle aria-hidden className="size-5 animate-spin" />
+                      ) : tunedIn ? (
+                        <Square aria-hidden className="size-5 fill-current" />
+                      ) : (
+                        <Play aria-hidden className="size-5 fill-current" />
+                      )}
                     </button>
-                    {volumeOpen && (
-                      <div className={styles.volumePopover} role="dialog" aria-label="Volume controls">
-                        <div className="mb-2 flex items-center justify-between gap-3">
-                          <Label>Volume</Label>
-                          <button
-                            type="button"
-                            onClick={toggleMute}
-                            className={cn(
-                              'v3-focus border border-[color-mix(in_oklab,var(--line)_48%,transparent)] px-2 py-1 font-mono text-[9px] font-extrabold tracking-[0.16em] text-muted uppercase hover:border-[var(--accent)] hover:text-[var(--accent)]',
-                              muted && 'border-[var(--accent)] bg-[var(--accent)] text-bg',
-                            )}
-                          >
-                            {muted ? 'Muted' : 'Mute'}
-                          </button>
-                        </div>
-                        <div className="flex min-w-0 items-center gap-3">
-                          <input
-                            type="range"
-                            min={0}
-                            max={100}
-                            value={volumePercent}
-                            onChange={e => setVolume(Number(e.target.value) / 100)}
-                            aria-label="Volume"
-                            className={styles.volumeHorizontal}
-                          />
-                          <span className="w-9 text-right font-mono text-[10px] font-bold text-[var(--accent-2)] tabular-nums">
-                            {volumePercent}
-                          </span>
-                        </div>
-                      </div>
+                    <button
+                      type="button"
+                      onClick={toggleMute}
+                      aria-pressed={muted}
+                      aria-label={muted ? 'Unmute' : 'Mute'}
+                      className={cn(
+                        styles.controlButton,
+                        muted && styles.activeControl,
+                      )}
+                    >
+                      {muted ? <VolumeX aria-hidden className="size-5" /> : <Volume2 aria-hidden className="size-5" />}
+                    </button>
+                    {like.available && (
+                      <button
+                        type="button"
+                        onClick={() => void like.like()}
+                        disabled={like.pending || like.liked}
+                        aria-pressed={like.liked}
+                        aria-label={like.liked ? 'Liked' : 'Like this track'}
+                        className={cn(
+                          styles.controlButton,
+                          like.liked && styles.activeControl,
+                          like.pending && 'opacity-60',
+                        )}
+                      >
+                        <Heart aria-hidden className={cn('size-5', like.liked && 'fill-current')} />
+                      </button>
                     )}
                   </div>
-                  {like.available && (
+                  <div className={styles.volumeRocker}>
+                    <input
+                      type="range"
+                      min={0}
+                      max={100}
+                      value={volumePercent}
+                      onChange={e => setVolume(Number(e.target.value) / 100)}
+                      aria-label="Volume"
+                      className={styles.volumeHorizontal}
+                    />
+                    <span className="font-mono text-[10px] font-bold text-[var(--accent-2)] tabular-nums">
+                      {volumePercent}
+                    </span>
+                  </div>
+                  <div className={styles.controlCluster}>
+                    <Dialog.Root open={infoOpen} onOpenChange={setInfoOpen}>
+                      <Dialog.Trigger asChild>
+                        <button
+                          type="button"
+                          className={styles.controlButton}
+                          aria-label="Station info"
+                        >
+                          <Info aria-hidden className="size-5" />
+                        </button>
+                      </Dialog.Trigger>
+                      <Dialog.Portal>
+                        <Dialog.Overlay className="fixed inset-0 z-40 bg-[color-mix(in_oklab,var(--bg)_72%,transparent)] backdrop-blur-md" />
+                        <Dialog.Content
+                          aria-describedby={undefined}
+                          className={cn(
+                            'fixed top-1/2 left-1/2 z-50 flex max-h-[calc(100vh-3rem)] w-[min(420px,calc(100vw-2rem))] -translate-x-1/2 -translate-y-1/2 flex-col border text-ink outline-none',
+                            styles.quietGlass,
+                            styles.prismDialog,
+                          )}
+                        >
+                          <div className="flex items-center justify-between gap-3 border-b border-[color-mix(in_oklab,var(--line)_58%,transparent)] px-4 py-3">
+                            <Dialog.Title className="font-mono text-[11px] font-extrabold tracking-[0.24em] text-[var(--accent)] uppercase">
+                              Station info
+                            </Dialog.Title>
+                            <Dialog.Close
+                              className="v3-focus grid size-8 place-items-center border border-[var(--line)] text-muted hover:text-ink"
+                              aria-label="Close station info"
+                            >
+                              <X aria-hidden className="size-4" />
+                            </Dialog.Close>
+                          </div>
+                          <div className={styles.infoGrid}>
+                            <span>Station</span><strong>{stationName}</strong>
+                            <span>Show</span><strong>{showLine}</strong>
+                            {listenerLine && <><span>Listeners</span><strong>{listenerLine}</strong></>}
+                            <span>Status</span><strong>{statusLine}</strong>
+                            {signal.latencyMs != null && tunedIn && <><span>Latency</span><strong>{signal.latencyMs} ms</strong></>}
+                            {playerUrl && <><span>Player</span><strong className="truncate">{playerUrl}</strong></>}
+                          </div>
+                        </Dialog.Content>
+                      </Dialog.Portal>
+                    </Dialog.Root>
                     <button
                       type="button"
-                      onClick={() => void like.like()}
-                      disabled={like.pending || like.liked}
-                      aria-pressed={like.liked}
-                      aria-label={like.liked ? 'Liked' : 'Like this track'}
-                      className={cn(
-                        'v3-focus grid size-10 place-items-center border border-[var(--line)] bg-[color-mix(in_oklab,var(--surface)_36%,transparent)] text-[var(--accent)] hover:border-[var(--accent)]',
-                        like.liked ? 'border-[var(--accent)] bg-[var(--accent)] text-bg' : 'cursor-pointer',
-                        like.pending && 'opacity-60',
-                      )}
+                      onClick={openRequest}
+                      className={styles.controlButton}
+                      aria-label="Request a track"
                     >
-                      <Heart aria-hidden className={cn('size-5', like.liked && 'fill-current')} />
+                      <Send aria-hidden className="size-5" />
                     </button>
+                    <span className={cn(styles.controlButton, styles.themeSlot)}>
+                      <ThemeSwitcher />
+                    </span>
+                  </div>
+                </div>
+              </div>
+
+              <div className={styles.signalFloor} aria-hidden="true">
+                <div className={styles.footerWave}>
+                  <PrismWaveform audioRef={audioRef} active={playing} />
+                </div>
+                <div>
+                  <Label>Weather</Label>
+                  {weatherLine ? (
+                    <p>{weatherLine}</p>
+                  ) : (
+                    <div className={styles.weatherReport}>
+                      <p>{weatherSummary || 'No report'}</p>
+                      {weatherLocation && <span>{weatherLocation}</span>}
+                    </div>
                   )}
+                </div>
+                <div>
+                  <Label>Station time</Label>
+                  <p suppressHydrationWarning>{stationTime}</p>
+                </div>
+                <div>
+                  <Label>Program</Label>
+                  <p>{showLine}</p>
+                  {showTiming?.until && <span className={styles.footerDetail}>{showTiming.until}</span>}
+                </div>
+                <div>
+                  <Label>Up next</Label>
+                  <p>{showTiming?.next || 'Checking schedule'}</p>
                 </div>
               </div>
             </div>
@@ -643,149 +720,6 @@ export default function PrismSkin(_props: SkinProps) {
           </aside>
         </div>
 
-        <footer className={cn('mt-4 flex flex-none flex-col justify-center gap-3 border-t border-[color-mix(in_oklab,var(--line)_46%,transparent)] px-4 py-3 sm:flex-row sm:items-center', styles.lowFooter)}>
-          <div className="flex min-w-0 flex-wrap items-center gap-2">
-            <span className={styles.footerTheme}>
-              <ThemeSwitcher
-                contentClassName={styles.prismDialog}
-                triggerClassName={styles.footerThemeTrigger}
-              />
-            </span>
-            <Dialog.Root open={stationOpen} onOpenChange={setStationOpen}>
-              <Dialog.Trigger asChild>
-                <button
-                  type="button"
-                  className={styles.footerButton}
-                  aria-label="Choose station"
-                >
-                  {stationName}
-                </button>
-              </Dialog.Trigger>
-              <Dialog.Portal>
-                <Dialog.Overlay className="fixed inset-0 z-40 bg-[color-mix(in_oklab,var(--bg)_72%,transparent)] backdrop-blur-md" />
-                <Dialog.Content
-                  aria-describedby={undefined}
-                  className={cn(
-                    'fixed top-1/2 left-1/2 z-50 flex max-h-[calc(100vh-3rem)] w-[min(420px,calc(100vw-2rem))] -translate-x-1/2 -translate-y-1/2 flex-col border text-ink outline-none',
-                    styles.quietGlass,
-                    styles.prismDialog,
-                  )}
-                >
-                  <div className="flex items-center justify-between gap-3 border-b border-[color-mix(in_oklab,var(--line)_58%,transparent)] px-4 py-3">
-                    <Dialog.Title className="font-mono text-[11px] font-extrabold tracking-[0.24em] text-[var(--accent)] uppercase">
-                      Stations
-                    </Dialog.Title>
-                    <Dialog.Close
-                      className="v3-focus grid size-8 place-items-center border border-[var(--line)] text-muted hover:text-ink"
-                      aria-label="Close station selector"
-                    >
-                      <X aria-hidden className="size-4" />
-                    </Dialog.Close>
-                  </div>
-                  <ScrollArea className="min-h-0 flex-1">
-                    <div className="grid gap-2 p-3">
-                      <form
-                        className="grid gap-2 border border-[color-mix(in_oklab,var(--line)_44%,transparent)] bg-[color-mix(in_oklab,var(--surface)_16%,transparent)] p-3"
-                        onSubmit={e => {
-                          e.preventDefault();
-                          const added = tuner?.addCustomStation(stationUrl);
-                          if (!added) return;
-                          setStationUrl('');
-                          setStationOpen(false);
-                        }}
-                      >
-                        <Label>Add station</Label>
-                        <div className="flex min-w-0 gap-2">
-                          <input
-                            value={stationUrl}
-                            onChange={e => setStationUrl(e.target.value)}
-                            placeholder="https://radio.example.com"
-                            className="v3-focus h-9 min-w-0 flex-1 border border-[color-mix(in_oklab,var(--line)_48%,transparent)] bg-[color-mix(in_oklab,var(--bg)_34%,transparent)] px-3 text-sm text-ink outline-none placeholder:text-muted"
-                          />
-                          <button
-                            type="submit"
-                            disabled={!stationUrl.trim()}
-                            className={cn(
-                              'v3-focus grid h-9 w-10 place-items-center border border-[var(--accent)] text-[var(--accent)]',
-                              stationUrl.trim()
-                                ? 'cursor-pointer bg-[color-mix(in_oklab,var(--accent)_10%,transparent)] hover:bg-[color-mix(in_oklab,var(--accent)_18%,transparent)]'
-                                : 'cursor-default opacity-45',
-                            )}
-                            aria-label="Add station"
-                          >
-                            <Plus aria-hidden className="size-4" />
-                          </button>
-                        </div>
-                      </form>
-                      {(tuner?.stations ?? []).map(station => {
-                        const active = tuner?.active.slug === station.slug;
-                        return (
-                          <button
-                            key={station.slug}
-                            type="button"
-                            aria-pressed={active}
-                            onClick={() => {
-                              tuner?.setStation(station.slug);
-                              setStationOpen(false);
-                            }}
-                            className={cn(
-                              'v3-focus flex min-w-0 cursor-pointer items-start gap-3 border px-3 py-2 text-left',
-                              active
-                                ? 'border-[var(--accent)] bg-[color-mix(in_oklab,var(--accent)_12%,transparent)]'
-                                : 'border-[color-mix(in_oklab,var(--line)_44%,transparent)] bg-[color-mix(in_oklab,var(--surface)_20%,transparent)] hover:border-[var(--accent)]',
-                            )}
-                          >
-                            <RadioTower aria-hidden className="mt-0.5 size-4 shrink-0 text-[var(--accent)]" />
-                            <span className="grid min-w-0 flex-1 gap-1">
-                              <span className="truncate text-sm font-bold text-ink">
-                                {station.isLocal ? stationName : station.name}
-                              </span>
-                              <span className="flex min-w-0 items-center gap-1 text-[11px] text-muted">
-                                {station.location && <MapPin aria-hidden className="size-3 shrink-0" />}
-                                <span className="truncate">
-                                  {station.location || station.genre || (station.isLocal ? 'Default station' : station.url)}
-                                </span>
-                              </span>
-                            </span>
-                            {active && <Check aria-hidden className="mt-0.5 size-4 shrink-0 text-[var(--accent)]" />}
-                          </button>
-                        );
-                      })}
-                      {tuner?.loading && (
-                        <p className="px-3 py-5 text-center text-sm text-muted">Loading stations...</p>
-                      )}
-                    </div>
-                  </ScrollArea>
-                </Dialog.Content>
-              </Dialog.Portal>
-            </Dialog.Root>
-            <span className="border border-[color-mix(in_oklab,var(--line)_36%,transparent)] bg-[color-mix(in_oklab,var(--surface)_20%,transparent)] px-3 py-2 font-mono text-[10px] font-extrabold tracking-[0.18em] text-[var(--accent)] uppercase">
-              {offline ? 'off air' : playing ? 'on air' : tunedIn ? status : 'ready'}
-            </span>
-            <button
-              type="button"
-              onClick={openRequest}
-              className="v3-focus flex items-center gap-2 border border-[color-mix(in_oklab,var(--line)_36%,transparent)] bg-[color-mix(in_oklab,var(--surface)_20%,transparent)] px-3 py-2 font-mono text-[10px] font-extrabold tracking-[0.18em] text-[var(--accent)] uppercase hover:border-[var(--accent)]"
-            >
-              <Send aria-hidden className="size-3.5" />
-              request
-            </button>
-          </div>
-
-          <div className="flex min-w-0 flex-1 flex-wrap items-center gap-x-4 gap-y-1 text-sm text-[var(--accent-2)] sm:justify-end">
-            <span className="min-w-0 truncate">
-              {showName ? `${showName} with ${djName}` : `with ${djName}`}
-            </span>
-            <div className="flex items-center gap-3 font-mono text-[10px] text-muted uppercase">
-              {listenerCount != null && (
-                <span>{listenerCount} {listenerCount === 1 ? 'listener' : 'listeners'}</span>
-              )}
-              {signal.latencyMs != null && tunedIn && (
-                <span>{signal.latencyMs} ms latency</span>
-              )}
-            </div>
-          </div>
-        </footer>
       </div>
 
       {requestOpen && (
